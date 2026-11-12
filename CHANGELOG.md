@@ -2,6 +2,19 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.2] - 2026-11-12
+
+### 修复
+
+- **重启后插件无法加载（web 启动页报 "Failed to load plugins"）**：根因是 0.2.1 把 Client 半的
+  `inject` 改成了对象形态 `{ required, optional }`。宿主 cordis 的 `inject` 只认**字符串数组**，
+  对象会被折成两个名叫 `required` / `optional` 的服务，于是条目永远处于 `pending`
+  （`waiting for service: required, optional`），web boot 在挂载 UI 之前就抛
+  `web boot: N entries did not activate`，整页无法打开。现在改回
+  `['slots', 'locale', 'sessions', 'configForms']`，并在源码里写明这条约束。
+  （0.2.1 的说明中"受限 facade 必须声明"的表述不准确：静态加载路径没有那道 guard。）
+- 设置面板整段包进 `try/catch`：面板挂载失败只降级为"没有设置页"，不再影响档位条与启动。
+
 ## [0.2.1] - 2026-11-12
 
 ### 修复

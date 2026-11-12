@@ -42,14 +42,13 @@ const plugin = loaded.factory((id) => {
   throw new Error(`unexpected require: ${id}`)
 })
 assert.equal(typeof plugin.apply, 'function', 'client 半必须导出 apply')
-// inject 支持数组和 { required, optional } 两种形态；统一拍平后再断言。
-const declared = new Set(
-  Array.isArray(plugin.inject)
-    ? plugin.inject
-    : [...(plugin.inject?.required ?? []), ...(plugin.inject?.optional ?? [])],
-)
+// 宿主 cordis 只认字符串数组：对象形态（{required, optional}）会被折成两个叫
+// "required"/"optional" 的服务，条目永远 pending，web boot 直接整页报错。
+assert.ok(Array.isArray(plugin.inject), 'client 半的 inject 必须是字符串数组（宿主 cordis 不支持 {required, optional}）')
+const declared = new Set(plugin.inject)
 assert.ok(declared.has('slots'), 'inject 必须包含 slots')
-// Client 半是受限 facade：没声明的服务读不到（guard 直接拒绝），所以这两项必须在 inject 里。
+assert.ok(declared.has('locale'), 'inject 必须包含 locale')
+// 没声明的服务读不到，所以这两项必须显式声明。
 assert.ok(declared.has('sessions'), 'inject 必须声明 sessions（会话命令通道）')
 assert.ok(declared.has('configForms'), 'inject 必须声明 configForms（插件页设置表单）')
 

@@ -305,6 +305,11 @@ npm run selftest   # 10 条验收场景（假 Cordis ctx 驱动真实插件代�
 6. 面板要出现在插件页，需要 `plugins.bundle.config` 里存在 key = 包名的 cell；本插件**无条件注册**
    该 cell，因此即使宿主没提供 `configForms`，页面上也会出现「设置」区块并如实说明不可用，
    而不是整块消失。
+7. **Client 半的 `inject` 必须是字符串数组**：宿主 cordis 会把 `inject` 折成 `{ 服务名: 拦截器 }`，
+   每个 key 都是它要等的服务。写成 `{ required: [...], optional: [...] }` 会被折成两个名叫
+   `required` / `optional` 的服务，条目永远 `pending`，web boot 直接报
+   `web boot: N entries did not activate` 并且整页打不开（0.2.1 的启动崩溃就是这条）。
+   `package.json` 里的 `dsh.client.inject` 同理，必须是字符串数组。
 
 ## 16. 目录
 
