@@ -2,6 +2,20 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.1] - 2026-11-12
+
+### 修复
+
+- **插件页看不到设置面板**：Client 半运行在受限 facade 中，只有 `inject` 里声明过的服务才能读取，
+  未声明时 `ctx.get(name)` 会被 guard 直接拒绝。此前 `configForms`、`sessions` 未声明，
+  读取异常被兜底吞掉，设置面板因此从未注册（`plugins.bundle.config` 无 occupant），
+  档位条点击也退化成 `noChannel`。现在 Client 半声明
+  `{ required: ['slots','locale'], optional: ['sessions','configForms'] }`。
+- 设置面板改为**无条件注册**（不再被试算的 `whileServed` 门控）：宿主没提供 `configForms` 时
+  面板如实显示"宿主未提供配置"。表单控制器改为可热切换的稳定数据源（`getSnapshot`/`subscribe`），
+  `whileServed` 只负责把控制器切换到 Host 实际服务的 namespace（`include:dsh-improve-think` 或包名）。
+- 设置项 `minReasoningChars`、`maxInterruptsPerStep` 补进 `PUBLIC_KEYS`，此前在设置页修改会被静默丢弃。
+
 ## [0.2.0] - 2026-11-12
 
 ### 变更（Breaking）

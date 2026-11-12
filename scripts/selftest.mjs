@@ -40,6 +40,7 @@ function createFakeHost({
   withCommands = true,
   withProjections = false,
   withTools = false,
+  settingsRows = null,
 } = {}) {
   const listeners = new Map()
   const effects = []
@@ -88,6 +89,7 @@ function createFakeHost({
       if (name === 'commands' && withCommands) return ctx.commands
       if (name === 'sessionProjections' && withProjections) return ctx.sessionProjections
       if (name === 'tools' && withTools) return ctx.tools
+      if (name === 'settings' && settingsRows !== null) return { describe: () => settingsRows }
       return undefined
     },
     provide() {},
@@ -607,7 +609,105 @@ check('9. 工具/幽灵步/能力补记：模型可读可写、无 step/start �
 check('10. 配置 schema：宿主缺 schemastery 时插件仍可用（降级而非崩溃）', () => {
   const ok = Config === undefined || (typeof Config === 'object' && Config !== null && typeof Config.parse === 'function')
   assert.ok(ok, `Config 必须要么是 schema 要么是 undefined，实际 ${typeof Config}`)
+  // 有 schema 的环境（DSH profile）里每个字段都必须是 volatile：
+  // 非 volatile 字段不会出现在插件设置页，用户就看不到任何设置项。
+  if (Config !== undefined) {
+    const fields = Config.dict ?? {}
+    const missing = Object.entries(fields)
+      .filter(([, child]) => child?.meta?.volatile !== true)
+      .map(([key]) => key)
+    assert.deepEqual(missing, [], `这些字段缺少 .volatile()，不会出现在插件设置页：${missing.join(', ')}`)
+  }
 })
+
+report.liveSettings = await scenarioLiveSettings()
+check('11. 设置热读取：volatile 取值器可读、保存后新会话立即生效、会话覆盖优先', () => {
+  assert.equal(report.liveSettings.tierFromSettings, 'strict')
+  assert.equal(report.liveSettings.tierAfterSave, 'extreme')
+  assert.equal(report.liveSettings.overrideKept, 'normal')
+})
+
+// ═══════════════════════════════════════ 11. 设置热读取：volatile 取值器 + 会话覆盖优先
+
+async function scenarioLiveSettings() {
+  const statePath = makeSessionStateFile()
+  const logDir = path.dirname(statePath)
+  // 模拟 DSH 的 volatile 字段：每个字段是取值器，插件页保存 = 换掉它返回的值。
+  // 插件不在加载时冻结配置，所以同一个插件实例应该立刻读到新值。
+  const live = { tier: 'strict', goalCheckInterval: 7, statePath, logDir }
+  const config = Object.fromEntries(Object.keys(live).map((key) => [key, { get: () => live[key] }]))
+
+  const host = createFakeHost({ config, withCommands: true, withProjections: true })
+  startPlugin(host, config)
+  const command = host.commands.get('improve')
+  assert.ok(command, '必须注册 improve 命令')
+
+  const ask = (sessionId, rawInput) =>
+    command.handler({
+      agent: { id: sessionId, session: { id: sessionId } },
+      rawInput,
+      attachments: [],
+      signal: { aborted: false },
+    })
+
+  const fresh = ask('session-live-a', 'status')
+  assert.equal(fresh.kind, 'success', `status 应成功：${fresh.text}`)
+  assert.ok(fresh.text.includes('严格'), `新会话应读到设置里的 strict：${fresh.text}`)
+  assert.ok(fresh.text.includes('goalCheckInterval=7'), `新会话应读到 goalCheckInterval=7：${fresh.text}`)
+
+  // 插件页保存：值原地改变，不重启插件，新会话立刻用新默认值。
+  live.tier = 'extreme'
+  const afterSave = ask('session-live-b', 'status')
+  assert.ok(afterSave.text.includes('极致'), `保存设置后新会话应立刻生效：${afterSave.text}`)
+
+  // 会话覆盖优先：显式改过档位的会话不被后续默认值覆盖。
+  const override = ask('session-live-a', 'tier normal')
+  assert.ok(override.text.includes('常规'), `显式切换应成功：${override.text}`)
+  live.tier = 'strict'
+  const stillOverridden = ask('session-live-a', 'status')
+  assert.ok(stillOverridden.text.includes('常规'), `会话覆盖应优先于默认值：${stillOverridden.text}`)
+
+  // 没有 settings 服务时，status 必须明说"无法查询"，不能假装设置页可用。
+  assert.ok(
+    stillOverridden.text.includes('设置页：无法查询'),
+    `缺少 settings 服务时应如实报告：${stillOverridden.text}`,
+  )
+
+  // 有 settings 服务且确实服务了本插件 → 报告"已开放"。
+  const servedHost = createFakeHost({
+    config,
+    withCommands: true,
+    settingsRows: [{ ns: 'include:dsh-improve-think', value: { tier: 'strict', idleGuard: true } }],
+  })
+  startPlugin(servedHost, config)
+  const served = servedHost.commands.get('improve').handler({
+    agent: { id: 'session-live-c', session: { id: 'session-live-c' } },
+    rawInput: 'status',
+    attachments: [],
+    signal: { aborted: false },
+  })
+  assert.ok(served.text.includes('设置页：已开放'), `服务了本插件时应报告已开放：${served.text}`)
+  assert.ok(served.text.includes('include:dsh-improve-think'), `应回显实际 namespace：${served.text}`)
+
+  // 服务了其他插件、没服务本插件（例如字段忘标 .volatile()）→ 明说未开放并给原因。
+  const missingHost = createFakeHost({
+    config,
+    withCommands: true,
+    settingsRows: [{ ns: 'include:other-plugin', value: { a: 1 } }],
+  })
+  startPlugin(missingHost, config)
+  const missing = missingHost.commands.get('improve').handler({
+    agent: { id: 'session-live-d', session: { id: 'session-live-d' } },
+    rawInput: 'status',
+    attachments: [],
+    signal: { aborted: false },
+  })
+  assert.ok(missing.text.includes('设置页：未开放'), `未服务本插件时应报告未开放：${missing.text}`)
+  assert.ok(missing.text.includes('.volatile()'), `应给出可操作的排查提示：${missing.text}`)
+
+  return { tierFromSettings: 'strict', tierAfterSave: 'extreme', overrideKept: 'normal' }
+}
+
 
 const failed = results.filter((item) => !item.ok)
 console.log('')

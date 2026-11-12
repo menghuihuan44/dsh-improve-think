@@ -1,6 +1,6 @@
 {
   "name": "dsh-improve-think",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "思考档 + 空转守护 + 路线校准：只拦反复无进展，不降低推理深度",
   "keywords": [

@@ -1,4 +1,4 @@
-﻿# dsh-improve-think
+# dsh-improve-think
 
 > 思考档 + 空转守护 + 路线校准：**只拦"反复无进展"，不拦"想得深"**。
 
@@ -83,6 +83,18 @@ plugin_manager({ action: "install_bundle", target: "<克隆下来的绝对路径
 
 > 设置面板只改**默认值**。当前会话的实时档位仍由档位条 / `/improve` 覆盖，两者互不打架：
 > 默认值 → 新会话起点，会话覆盖 → 该会话的当前值。
+
+**看不到设置表单？** 按顺序排查：
+
+1. **刷新页面**。Client 半是浏览器端 bundle，重装插件后必须刷新才会加载新代码。
+2. 用 `/improve status` 看第 6 行：`设置页：已开放（<namespace>，13 个字段）` 才算 Host 已开放。
+   显示「未开放」说明本插件条目没进 `settings.describe()`——Config 的每个字段都必须带
+   `.volatile()`（本仓库已全部带上）；显示「无法查询」说明宿主没提供 `settings` 服务。
+3. 宿主日志 `~/.dsh/dsh-improve-think/logs/global.jsonl` 里搜 `settings.form.checked`：
+   `status:"served"` 即表示 Host 侧确实在服务这个 namespace（`capabilities.ready` 里的
+   `settingsForm` 是加载瞬间的快照，太早，可能误报 `missing`）。
+4. Client 半运行在受限 facade 里：**凡要读的服务必须在 `inject` 声明**，否则读取会被 guard
+   拒绝、功能静默消失。本插件声明了 `{ required: ['slots','locale'], optional: ['sessions','configForms'] }`。
 
 ## 5. 配置项（`cordis.patch.yml` 条目 options）
 
@@ -290,6 +302,9 @@ npm run selftest   # 10 条验收场景（假 Cordis ctx 驱动真实插件代�
    "不终止会话、不丢上下文、把提示送达"，不保证模型一定照做。
 4. 每 step 最多打断 `maxInterruptsPerStep` 次；子代理会话同样受守护（未做特殊豁免）。
 5. 设置面板改的是默认值；想改"当前会话"仍需档位条 / `/improve`。
+6. 面板要出现在插件页，需要 `plugins.bundle.config` 里存在 key = 包名的 cell；本插件**无条件注册**
+   该 cell，因此即使宿主没提供 `configForms`，页面上也会出现「设置」区块并如实说明不可用，
+   而不是整块消失。
 
 ## 16. 目录
 
