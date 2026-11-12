@@ -44,7 +44,7 @@ const plugin = loaded.factory((id) => {
 assert.equal(typeof plugin.apply, 'function', 'client 半必须导出 apply')
 assert.ok(plugin.inject.includes('slots'), 'inject 必须包含 slots')
 
-function makeHarness({ withSessions = true, withRemote = true, withConfigForms = true } = {}) {
+function makeHarness({ withSessions = true, withRemote = true, withConfigForms = true, served = null } = {}) {
   const registrations = []
   const calls = []
   const sessions = withSessions
@@ -116,7 +116,8 @@ function makeHarness({ withSessions = true, withRemote = true, withConfigForms =
         },
         whileServed(namespaces, register) {
           servedNamespaces.push(...namespaces)
-          return register()
+          // 默认模拟 Host 服务全部候选 namespace（真实主机就是其中被服务的那一个）。
+          return register(new Set(served ?? namespaces))
         },
       }
     : undefined
@@ -281,7 +282,11 @@ function allNodes(node, bucket = []) {
   assert.ok(panel, '应注册 plugins.bundle.config')
   assert.equal(panel.definition.key, 'dsh-improve-think', '插槽 key 必须是包名')
   assert.deepEqual(formEntryIds, ['include:dsh-improve-think'], '应按 profile 条目 id 取表单')
-  assert.deepEqual(servedNamespaces, ['include:dsh-improve-think'], 'whileServed 应收到本插件 namespace')
+  assert.deepEqual(
+    servedNamespaces,
+    ['include:dsh-improve-think', 'dsh-improve-think'],
+    'whileServed 应收到两个候选 namespace，由 Host 实际服务决定用哪个',
+  )
 
   const injected = panel.definition.inject()
   assert.equal(typeof injected.saveField, 'function')
@@ -325,4 +330,12 @@ function allNodes(node, bucket = []) {
   assert.equal(findSlot(registrations, 'plugins.bundle.config'), undefined)
 }
 
-console.log('client.test.mjs：8 组断言全部通过')
+// ---- 9. Host 只服务包名形式的 namespace 时，面板用包名取表单 ----------------
+{
+  const { registrations, formEntryIds } = makeHarness({ served: ['dsh-improve-think'] })
+  const panel = findSlot(registrations, 'plugins.bundle.config')
+  assert.ok(panel, '只服务包名 namespace 时也应注册设置面板')
+  assert.deepEqual(formEntryIds, ['dsh-improve-think'], '应按实际被服务的 namespace 取表单')
+}
+
+console.log('client.test.mjs：9 组断言全部通过')

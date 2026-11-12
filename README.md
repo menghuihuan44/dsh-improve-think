@@ -1,4 +1,4 @@
-# dsh-improve-think
+﻿# dsh-improve-think
 
 > 思考档 + 空转守护 + 路线校准：**只拦"反复无进展"，不拦"想得深"**。
 
@@ -235,7 +235,7 @@ dsh_improve { "action": "idleGuard", "value": "off" }
 
 ```bash
 npm run check      # 语法检查
-npm test           # 28 条 core 单测 + 8 组 client 渲染/接线断言
+npm test           # 28 条 core 单测 + 9 组 client 渲染/接线断言
 npm run selftest   # 10 条验收场景（假 Cordis ctx 驱动真实插件代码）
 ```
 
