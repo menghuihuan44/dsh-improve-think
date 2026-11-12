@@ -1,0 +1,74 @@
+{
+  "name": "dsh-improve-think",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "思考档 + 空转守护 + 路线校准：只拦反复无进展，不降低推理深度",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "reasoning",
+    "idle-guard",
+    "thinking-mode"
+  ],
+  "license": "MIT",
+  "author": "dsh-improve-think contributors",
+  "homepage": "https://github.com/menghuihuan44/dsh-improve-think#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/menghuihuan44/dsh-improve-think.git"
+  },
+  "bugs": {
+    "url": "https://github.com/menghuihuan44/dsh-improve-think/issues"
+  },
+  "main": "lib/index.js",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./icon": "./icon.svg",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "icon.svg",
+    "locale/*.json",
+    "lib/index.js",
+    "lib/client.js",
+    "lib/core/*.js",
+    "lib/logger.js",
+    "lib/state-store.js",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "test/*.mjs",
+    "scripts/*.mjs"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.2-rc.1"
+  },
+  "scripts": {
+    "test": "node test/core.test.mjs && node test/client.test.mjs",
+    "selftest": "node scripts/selftest.mjs",
+    "check": "node --check lib/index.js && node --check lib/client.js"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  }
+}

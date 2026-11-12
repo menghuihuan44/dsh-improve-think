@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Thinking Tier & Idle Guard (dsh-improve-think)",
+    "description": "Composer tier bar: thinking tier, adversarial review, idle guard and first-turn fast start. Intervenes only on repetitive non-progress, never lowers reasoning depth"
+  }
+}
