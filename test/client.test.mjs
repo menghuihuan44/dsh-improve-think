@@ -120,6 +120,15 @@ assert.ok(
   String(styleTag.textContent).includes("[data-active='true']"),
   '样式表里要包含选中态的实心主色规则',
 )
+// 选中态不能靠"实心主色 + 白字"：主色在不同主题下可能很浅，白字会糊掉。
+assert.ok(
+  String(styleTag.textContent).includes("color: var(--dsw-alias-label-primary"),
+  '选中态文字应使用 label-primary（保证可读），而不是写死 #fff',
+)
+assert.ok(
+  String(styleTag.textContent).includes('justify-content: center'),
+  '档位条内容应居中（用户要求放在当前位置的中间）',
+)
 assert.equal(
   styleTag.attrs['data-dsh-improve-think-style'],
   '',
