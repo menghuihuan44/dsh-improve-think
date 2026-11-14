@@ -2,6 +2,16 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.5] - 2026-11-14
+
+### 修复
+
+- **主题色落到硬编码兜底**：本版本客户端只有 14 个 `--dsw-alias-*` 主题变量，之前 CSS 里用的
+  `surface-*` / `interactive-bg-hover` / `label-tertiary` / `border-l4` / `state-business-primary`
+  等名字都不存在，等于一直在用写死的颜色。现在全部换成真实存在的 token，浅色与深色主题各自正确。
+- **档位条偶发「一个档位都没选中」**：插件页设置快照处于加载中时是空对象，会盖掉投影里的默认值。
+  现将快照限定为 `ready` 且非空才采用，否则回落到投影默认值。
+
 ## [0.2.4] - 2026-11-14
 
 ### 新增
