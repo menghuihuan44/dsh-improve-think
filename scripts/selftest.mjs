@@ -517,7 +517,7 @@ async function scenarioAgentTool() {
   startPlugin(host, { statePath, logDir })
   const call = (args) => host.tools.get('dsh_improve').execute(args, { agent: host.agent })
 
-  assert.equal(host.tools.size, 1, '应注册一个 dsh_improve 工具')
+  assert.equal(host.tools.size, 2, '应注册 dsh_improve 与 dsh_choice 两个工具')
   const tool = host.tools.get('dsh_improve')
   assert.ok(tool.parameters?.properties?.action, '工具参数应声明 action')
   assert.ok(tool.output?.schema, '工具必须声明 output.schema')
@@ -554,8 +554,96 @@ async function scenarioAgentTool() {
   return { toolCount: host.tools.size, readyReason: ready[0].reason }
 }
 
-// ═══════════════════════════════════════ 执行
+/**
+ * 决策选项框：模型弹框 → 用户点选项/其它/留空/取消 → followup 内容不同。
+ *
+ * 这里验证的是"语义正确"而不是 UI：留空必须变成「换一批方案」的要求，
+ * 带说明必须原样成为新约束，取消必须让模型自己继续而不是卡住。
+ */
+async function scenarioChoice() {
+  const statePath = makeSessionStateFile()
+  const logDir = path.dirname(statePath)
+  const host = createFakeHost({
+    config: { statePath, logDir, tier: 'strict' },
+    withTools: true,
+    withCommands: true,
+    withProjections: true,
+  })
+  startPlugin(host, { statePath, logDir, tier: 'strict' })
 
+  const choose = host.tools.get('dsh_choice')
+  assert.ok(choose, '严格档应注册 dsh_choice 工具')
+  assert.ok(choose.parameters?.properties?.options, '工具应要求 options')
+  const run = (rawInput) => host.commands.get('improve').handler({ agent: host.agent, rawInput })
+  const pendingOf = () => {
+    const unit = host.projections[0]
+    return unit.wire.view(unit.init({ id: 'session-selftest' })).pendingChoice
+  }
+
+  // 1) 弹框：登记而不是阻塞
+  const opened = await choose.execute(
+    {
+      question: '接口怎么定？',
+      note: '两种都不完美',
+      options: [
+        { label: 'A 方案', detail: '快但耦合' },
+        { label: 'B 方案', detail: '慢但清晰' },
+      ],
+    },
+    { agent: host.agent },
+  )
+  assert.ok(opened.text.includes('选项'), '应回执已展示选项')
+  assert.equal(host.tools.size, 2, '应同时存在 dsh_improve 与 dsh_choice')
+  const pending = pendingOf()
+  assert.ok(pending, '投影里应出现待选择项')
+  assert.equal(pending.options.length, 2)
+
+  // 2) 选 0 号 → followup 带选项名，选择项清空
+  const picked = await run('choose 0')
+  assert.equal(picked.kind, 'success')
+  assert.ok(host.followups.at(-1).includes('A 方案'), '选择应回传给模型')
+  assert.equal(pendingOf(), null, '选择后应清空待选择项')
+
+  // 3) 没有待选择时回答 → 报错而不是静默成功
+  const none = await run('choose 1')
+  assert.equal(none.kind, 'error')
+
+  // 4) 「其它」留空 = 不认可现有方向，要求换新方案
+  await choose.execute({ question: '再选一次', options: ['甲', '乙'] }, { agent: host.agent })
+  await run('choose other')
+  assert.ok(host.followups.at(-1).includes('重新考虑'), '留空发送应要求换一批方向')
+
+  // 5) 「其它」带说明 = 原样成为新约束
+  await choose.execute({ question: '第三次', options: ['P', 'Q'] }, { agent: host.agent })
+  await run('choose other 我希望做成 C 方案')
+  assert.ok(host.followups.at(-1).includes('我希望做成 C 方案'))
+
+  // 6) 取消 = 让模型按自己判断继续（不是卡住）
+  await choose.execute({ question: '第四次', options: ['X', 'Y'] }, { agent: host.agent })
+  await run('choose cancel')
+  assert.ok(host.followups.at(-1).includes('最佳判断'))
+  assert.equal(pendingOf(), null)
+
+  // 7) 常规档不启用：工具直接拒绝，且界面上不会出现选项框
+  await run('tier normal')
+  await assert.rejects(
+    () => choose.execute({ question: '常规档', options: ['a', 'b'] }, { agent: host.agent }),
+    /常规档/,
+  )
+  // 8) 少于两个选项（只给了方向名）也要拒绝
+  await run('tier extreme')
+  await assert.rejects(() => choose.execute({ question: '只有一个', options: ['单'] }, { agent: host.agent }), /2 个选项/)
+
+  // 9) 描述里应该出现决策选项框的规范（严格/极致档才有）
+  const text = host.sectionText?.() ?? ''
+  return {
+    toolCount: host.tools.size,
+    lastFollowup: host.followups.at(-1) ?? '',
+    sectionHasChoice: String(text).includes('dsh_choice'),
+  }
+}
+
+// ═══════════════════════════════════════ 执行
 const report = {}
 report.stagnation = await scenarioStagnation()
 check('1. 空转模拟：observe 只记录；interrupt 打断并注入纠正提示且任务继续', () => {
@@ -603,7 +691,7 @@ check('8. UI 接线：投影可读、命令可写、两者一致', () => {
 
 report.agentTool = await scenarioAgentTool()
 check('9. 工具/幽灵步/能力补记：模型可读可写、无 step/start 不评估、能力如实补记', () => {
-  assert.equal(report.agentTool.toolCount, 1)
+  assert.equal(report.agentTool.toolCount, 2)
 })
 
 check('10. 配置 schema：宿主缺 schemastery 时插件仍可用（降级而非崩溃）', () => {
@@ -625,6 +713,12 @@ check('11. 设置热读取：volatile 取值器可读、保存后新会话立即
   assert.equal(report.liveSettings.tierFromSettings, 'strict')
   assert.equal(report.liveSettings.tierAfterSave, 'extreme')
   assert.equal(report.liveSettings.overrideKept, 'normal')
+})
+
+report.choice = await scenarioChoice()
+check('12. 决策选项框：弹框登记、选择/其它/留空换方案/取消各自语义正确，常规档不启用', () => {
+  assert.equal(report.choice.toolCount, 2)
+  assert.ok(report.choice.sectionHasChoice, '严格/极致档的系统提示词应包含 dsh_choice 规范')
 })
 
 // ═══════════════════════════════════════ 11. 设置热读取：volatile 取值器 + 会话覆盖优先

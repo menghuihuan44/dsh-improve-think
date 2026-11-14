@@ -201,7 +201,42 @@ Host 按当前会话的实际配置算出，不是前端猜的——它显示什
 
 这段规范是**软约束**；真正兜底的是 §7 的 Hook 检测。
 
-## 10. 命令与工具
+## 10. 决策选项框（严格 / 极致档）
+
+有时候"接下来往哪个方向做"不该由模型单独决定。严格档与极致档会给模型一个工具
+`dsh_choice`，让它把方向选择变成一个**选项框**交给用户点选。
+
+| 档位 | 什么时候弹 |
+| --- | --- |
+| 常规（normal） | 不弹。调用会被拒绝（保持原有行为，不打扰）。 |
+| 严格（strict） | 只在**极其重要的决策**：架构、接口形状、数据结构、删改范围、方案取舍。小改动不弹。 |
+| 极致（extreme） | 几乎只要会改变设计与实现方向的决定都弹。 |
+
+弹框长什么样、怎么回答：
+
+- 问题在上，下面是 2–4 个方向（每个方向带一句"代价/影响"），点一下就是选择。
+- 每个选项框都有 **「其它」**：点开是空白输入框，**发送按钮始终可见**。
+- **发送空白内容**的意思是「我不知道怎么做，但我对现在的方案方向不满意」——模型必须
+  放弃当前方向、重新考虑新的方案，**并再给出一批新选项**（不允许重复同一批）。
+- 点 `×` 等于"你先自己决定"，模型会按最佳判断继续，不会卡住。
+
+模型侧：
+
+```
+dsh_choice {
+  "question": "数据层用哪种方案？",
+  "note": "两者都不完美，看你更在意哪头",
+  "options": [
+    { "label": "本地索引", "detail": "快，但要自己维护一致性" },
+    { "label": "库自带事务", "detail": "慢一点，边界更清楚" }
+  ]
+}
+```
+
+调用后模型结束本轮，等用户点选；选择结果（或被放弃时的说明、或"你自己决定"）再回传给模型。
+选项框不阻塞会话，也不清空上下文；它和档位条同宽、同在输入框上方。
+
+## 11. 命令与工具
 
 ```
 /improve                    # 查看当前档位与状态
@@ -211,6 +246,10 @@ Host 按当前会话的实际配置算出，不是前端猜的——它显示什
 /improve firstTurnFast off
 /improve observe            # 空转动作 = 只记录
 /improve interrupt          # 空转动作 = 流内打断（默认）
+/improve choose 0           # 回答待选择项（编号从 0 开始）
+/improve choose other 用 C  # 「其它」答案，原样作为新约束
+/improve choose other       # 留空 = 不认可方向，要求换新方案
+/improve choose cancel      # 让模型自己决定
 /improve reset              # 恢复默认
 ```
 
@@ -222,7 +261,7 @@ dsh_improve { "action": "tier", "value": "extreme" }
 dsh_improve { "action": "idleGuard", "value": "off" }
 ```
 
-## 11. 扩展点与降级
+## 12. 扩展点与降级
 
 | 能力 | 扩展点 | 缺失时 |
 | --- | --- | --- |
@@ -238,7 +277,7 @@ dsh_improve { "action": "idleGuard", "value": "off" }
 并在 `/improve status` 与 UI 标注"流内打断不可用（已降级）"。
 完整签名与验证方法见 [`docs/EXTENSION-POINTS.md`](docs/EXTENSION-POINTS.md)。
 
-## 12. 日志
+## 13. 日志
 
 默认写到 `<DSH 配置根>/dsh-improve-think/logs/<sessionId>.jsonl`（单文件超 512KB 滚动成 `.1`）：
 
@@ -257,12 +296,12 @@ dsh_improve { "action": "idleGuard", "value": "off" }
 
 目的是**可复盘**：每次打断都能回答"为什么打断、相似度多少、打断后怎么继续"。
 
-## 13. 自测
+## 14. 自测
 
 ```bash
 npm run check      # 语法检查
-npm test           # 28 条 core 单测 + 9 组 client 渲染/接线断言
-npm run selftest   # 10 条验收场景（假 Cordis ctx 驱动真实插件代码）
+npm test           # 28 条 core 单测 + 15 组 client 渲染/接线断言
+npm run selftest   # 12 条验收场景（假 Cordis ctx 驱动真实插件代码）
 ```
 
 三套测试都不需要网络、不需要启动 DSH、不需要模型。
@@ -279,13 +318,17 @@ npm run selftest   # 10 条验收场景（假 Cordis ctx 驱动真实插件代�
 8. **UI 接线**：投影 key/stateVersion/schema/wire 正确、命令写回后投影一致；
 9. **工具/幽灵步/能力补记**：`dsh_improve` 与命令同源、非法输入报错、无 `step/start` 的幽灵步不评估、
    `capabilities.ready` 如实补记；
-10. **设置 schema 降级**：宿主不提供 schemastery 时插件仍可用（不崩、不谎报）。
+10. **设置 schema 降级**：宿主不提供 schemastery 时插件仍可用（不崩、不谎报）；
+11. **设置热读取**：volatile 取值器改完立刻生效、会话覆盖优先于全局默认值；
+12. **决策选项框**：弹框登记、`choose 0` 回传选项、`choose other` 带说明原样回传、
+    留空要求换新方案、`cancel` 让模型自己继续、常规档拒绝、少于两个选项拒绝。
 
-`npm test` 的 client 部分另外验证：模块 id 等于包名、注册 `conversation.input.dock`、
-投影渲染（含"疑似空转/降级"标记）、点击首选 `ISession.command`、缺 `sessions` 时退到 `remote.commands.execute`、
+`npm test` 的 client 部分另外验证：模块 id 等于包名、注册 `conversation.input.dock`（档位条 + 决策选项框）、
+投影渲染（含"疑似空转/降级"标记）、选中态用 `data-active` 且样式表真的注入、自检按钮把 Host 真实状态
+铺回条内、点击首选 `remote.commands.execute` 并逐级回退、缺任何通道时不抛异常、
 无 `sessionId` 不发命令、插件页设置面板的注册/读快照/写回/恢复默认、缺 `configForms` 时不注册空面板。
 
-## 14. 真实环境验证记录
+## 15. 真实环境验证记录
 
 环境：desktop profile、dsh `0.2.2-rc.1`、Node `v26.13.0`；以 `plugin_manager install_bundle`（`link:` 形式）挂载。
 
@@ -306,7 +349,7 @@ npm run selftest   # 10 条验收场景（假 Cordis ctx 驱动真实插件代�
 - **真实"空转复发"未在自然对话中触发**：真实模型不会主动进死循环，构造它要烧大量 token；
   这条路径由 `npm run selftest` 用真实 chunk / 事件形状验证（场景 1、7）。真实环境目前证明的是"不误伤"那一侧。
 
-## 15. 已知限制
+## 16. 已知限制
 
 1. `llm/stream` 是 `LlmRuntime` 上的 waterfall：插件只能观察/短路流，**不能修改**已冻结的请求
    （不改 system prompt、不改 tools）。所以行为规范走 `systemPrompt.section`，而不是改请求。
@@ -325,7 +368,7 @@ npm run selftest   # 10 条验收场景（假 Cordis ctx 驱动真实插件代�
    `web boot: N entries did not activate` 并且整页打不开（0.2.1 的启动崩溃就是这条）。
    `package.json` 里的 `dsh.client.inject` 同理，必须是字符串数组。
 
-## 16. 目录
+## 17. 目录
 
 ```
 .

@@ -271,7 +271,14 @@ function makeHarness({
   return { registrations, calls, formWrites, formResets, formEntryIds, servedNamespaces, form }
 }
 
-const findSlot = (registrations, name) => registrations.find((entry) => entry.definition.name === name)
+const findSlot = (registrations, name, id) =>
+  registrations.find(
+    (entry) => entry.definition.name === name && (id === undefined || entry.definition.id === id),
+  )
+// ????????????? conversation.input.dock?order 30 / 31??? id ????
+const findBar = (registrations) =>
+  findSlot(registrations, 'conversation.input.dock', 'dsh-improve-think') ??
+  findBar(registrations)
 
 function textsOf(node, bucket = []) {
   if (node === null || node === undefined || node === false) return bucket
@@ -301,8 +308,8 @@ function allNodes(node, bucket = []) {
 // ---- 1. 注册进 composer dock -------------------------------------------------
 {
   const { registrations } = makeHarness()
-  assert.equal(registrations.length, 2, '应注册 dock 条目 + 插件页设置面板')
-  const { definition } = findSlot(registrations, 'conversation.input.dock')
+  assert.equal(registrations.length, 3, '应注册档位条 + 决策选项框 + 插件页设置面板')
+  const { definition } = findBar(registrations)
   assert.equal(definition.name, 'conversation.input.dock')
   assert.equal(definition.id, 'dsh-improve-think')
   assert.equal(definition.order, 30)
@@ -316,7 +323,7 @@ const findHintButton = (tree, hint) =>
 // ---- 2. 投影渲染 -------------------------------------------------------------
 {
   const { registrations } = makeHarness()
-  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const Component = findBar(registrations).component
   const tree = Component({
     sessionId: 'session-1',
     useProjection: () => ({
@@ -349,7 +356,7 @@ const findHintButton = (tree, hint) =>
 // ---- 3. 无投影时退回默认值 ---------------------------------------------------
 {
   const { registrations } = makeHarness()
-  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const Component = findBar(registrations).component
   const tree = Component({ sessionId: 'session-2' })
   const texts = textsOf(tree)
   const normal = allNodes(tree).find((node) => node.type === 'button' && node.props?.['aria-pressed'] === true)
@@ -362,7 +369,7 @@ const findHintButton = (tree, hint) =>
 // ---- 4. 点击写回 Host --------------------------------------------------------
 {
   const { registrations, calls } = makeHarness()
-  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const Component = findBar(registrations).component
   const tree = Component({
     sessionId: 'session-3',
     useProjection: () => ({ tier: 'normal', adversarial: false, idleGuard: true, firstTurnFast: true }),
@@ -384,7 +391,7 @@ const findHintButton = (tree, hint) =>
 // ---- 5. 没有 sessionId 时不发命令 -------------------------------------------
 {
   const { registrations, calls } = makeHarness()
-  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const Component = findBar(registrations).component
   const tree = Component({ useProjection: () => ({ tier: 'normal' }) })
   const buttons = allNodes(tree).filter((node) => node.type === 'button')
   buttons[0].props.onClick()
@@ -395,7 +402,7 @@ const findHintButton = (tree, hint) =>
 // ---- 6. 没有 remote 命名空间时退回 ISession.command（旧宿主兜底） -------------
 {
   const { registrations, calls } = makeHarness({ withRemote: false })
-  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const Component = findBar(registrations).component
   const tree = Component({ sessionId: 'session-4', useProjection: () => ({ tier: 'normal' }) })
   const buttons = allNodes(tree).filter((node) => node.type === 'button')
   const strict = buttons.find((button) => textsOf(button).includes('tiers.strict'))
@@ -468,7 +475,7 @@ const findHintButton = (tree, hint) =>
 // ---- 8. 没有 configForms 时仍然注册面板，但如实显示"宿主未提供配置" -------------
 {
   const { registrations } = makeHarness({ withConfigForms: false })
-  assert.equal(registrations.length, 2, '无 configForms 时仍要注册 dock 条目 + 设置面板（不能静默消失）')
+  assert.equal(registrations.length, 3, '无 configForms 时仍要注册档位条 + 选项框 + 设置面板（不能静默消失）')
   const panel = findSlot(registrations, 'plugins.bundle.config')
   assert.ok(panel, '无 configForms 时也要有设置面板占位')
   const injected = panel.definition.inject()
@@ -490,7 +497,7 @@ const findHintButton = (tree, hint) =>
 // ---- 10. 默认值 / 会话覆盖：覆盖压过默认值，且能一键恢复 ---------------------
 {
   const { registrations, calls } = makeHarness()
-  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const Component = findBar(registrations).component
   const tree = Component({
     sessionId: 'session-5',
     useProjection: () => ({
@@ -513,7 +520,7 @@ const findHintButton = (tree, hint) =>
 // ---- 11. 没有会话覆盖时，档位条实时跟随插件页默认值 -------------------------
 {
   const { registrations } = makeHarness()
-  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const Component = findBar(registrations).component
   const tree = Component({
     sessionId: 'session-6',
     useProjection: () => ({
@@ -536,7 +543,7 @@ const findHintButton = (tree, hint) =>
 // ---- 12. 宿主把 remote 通道锁住时，点击仍然走 sessions 通道 -------------------
 {
   const { registrations, calls } = makeHarness({ remoteGuard: true })
-  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const Component = findBar(registrations).component
   const tree = Component({ sessionId: 'session-7' })
   const extreme = allNodes(tree).find((node) => node.type === 'button' && textsOf(node).includes('tiers.extreme'))
   assert.ok(extreme, '应有极致档按钮')
@@ -550,7 +557,7 @@ const findHintButton = (tree, hint) =>
 // ---- 13. 所有通道都被锁住时，点击只失败不崩溃（错误走组件内状态） -------------
 {
   const { registrations, calls } = makeHarness({ withSessions: false, remoteGuard: true })
-  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const Component = findBar(registrations).component
   const tree = Component({ sessionId: 'session-8' })
   const normal = allNodes(tree).find((node) => node.type === 'button' && textsOf(node).includes('tiers.normal'))
   // 点击必须吞掉通道错误（否则会冒泡成未处理的 Promise 拒绝，把整个目录树带崩）。
@@ -562,16 +569,16 @@ const findHintButton = (tree, hint) =>
 // ---- 14. 受限 facade：apply 期间不得裸读未声明服务（否则整页启动失败） --------
 {
   const { registrations } = makeHarness({ strictFacet: true })
-  assert.equal(registrations.length, 2, '受限 facade 下仍应注册档位条与设置面板')
+  assert.equal(registrations.length, 3, '受限 facade 下仍应注册档位条、选项框与设置面板')
   const names = registrations.map((entry) => entry.definition.name).sort()
-  assert.deepEqual(names, ['conversation.input.dock', 'plugins.bundle.config'])
+  assert.deepEqual(names, ['conversation.input.dock', 'conversation.input.dock', 'plugins.bundle.config'])
 }
 
 // ---- 15. 选中态与自检：一眼能看出选了哪个，并能拿到 Host 的真实状态 ----------
 {
   const statusText = '思考档：严谨 · 守护：开 · 已生效'
   const { registrations, calls } = makeHarness({ statusText })
-  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const Component = findBar(registrations).component
   const tree = Component({
     sessionId: 'session-9',
     useProjection: () => ({ tier: 'strict', adversarial: false, idleGuard: true, firstTurnFast: true }),
