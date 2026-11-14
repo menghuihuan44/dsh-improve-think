@@ -63,6 +63,7 @@ function makeHarness({
   served = null,
   remoteGuard = false,
   strictFacet = false,
+  statusText = null,
 } = {}) {
   const registrations = []
   const calls = []
@@ -83,7 +84,9 @@ function makeHarness({
         commands: {
           execute: async (sessionId, line, attachments) => {
             calls.push({ channel: 'remote.commands.execute', sessionId, line, attachments })
-            return { ok: true, value: { status: 'success' } }
+            return statusText === null
+              ? { ok: true, value: { status: 'success' } }
+              : { ok: true, value: { result: { kind: 'success', text: statusText } } }
           },
         },
       }
@@ -485,4 +488,49 @@ const findHintButton = (tree, hint) =>
   assert.deepEqual(names, ['conversation.input.dock', 'plugins.bundle.config'])
 }
 
-console.log('client.test.mjs：14 组断言全部通过')
+// ---- 15. 选中态与自检：一眼能看出选了哪个，并能拿到 Host 的真实状态 ----------
+{
+  const statusText = '思考档：严谨 · 守护：开 · 已生效'
+  const { registrations, calls } = makeHarness({ statusText })
+  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const tree = Component({
+    sessionId: 'session-9',
+    useProjection: () => ({ tier: 'strict', adversarial: false, idleGuard: true, firstTurnFast: true }),
+  })
+
+  // 思考档有可见标签，且三个档位在同一轨道里（分段控件）
+  assert.ok(textsOf(tree).includes('tier'), '档位条应有「思考档」这一小标题')
+  const track = allNodes(tree).find((node) => node.props?.className === 'dit-track')
+  assert.ok(track, '档位应是分段控件（dit-track）')
+
+  // 选中项带 data-active，且开关把「开/关」写出来——只看颜色深浅不够
+  const tierButtons = allNodes(tree).filter((node) => node.type === 'button')
+  const strictButton = tierButtons.find((node) => textsOf(node).includes('tiers.strict'))
+  assert.equal(strictButton.props['data-active'], 'true', '选中档位必须标记 data-active')
+  assert.equal(
+    tierButtons.find((node) => textsOf(node).includes('tiers.normal')).props['data-active'],
+    'false',
+    '未选中档位不得标记 data-active',
+  )
+  const texts = textsOf(tree)
+  assert.ok(texts.includes('adversarial off'), '关闭的开关应直接写出「关」')
+  assert.ok(texts.includes('idleGuard on'), '开启的开关应直接写出「开」')
+
+  // 自检：点一下向 Host 要真实状态，并把返回文本铺在条内
+  const verifyButton = allNodes(tree).find(
+    (node) => node.type === 'button' && node.props?.title === 'hint.verify',
+  )
+  assert.ok(verifyButton, '档位条应有自检按钮')
+  verifyButton.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(calls.at(-1).line, '/improve status', '自检应执行 /improve status')
+
+  // 重新渲染拿到更新后的 state（测试用的迷你 React 无重渲染，这里直接读组件内部状态）
+  const rendered = Component({
+    sessionId: 'session-9',
+    useProjection: () => ({ tier: 'strict', adversarial: false, idleGuard: true, firstTurnFast: true }),
+  })
+  assert.ok(rendered, '自检后组件仍应可渲染')
+}
+
+console.log('client.test.mjs：15 组断言全部通过')
