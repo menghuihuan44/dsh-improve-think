@@ -2,6 +2,32 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.3] - 2026-11-14
+
+### 修复
+
+- **主页面档位条点击报 `cannot get property "remote.commands" without inject`**：Client 半的
+  `inject` 里只声明了 `sessions`，没声明远程命名空间。宿主把每个远程命名空间注册成独立服务
+  （`remote.commands`），**读取属性这一瞬**就会抛错，`try/catch` 包不住。现在 `inject` 补上
+  `'remote'` 与 `'remote.commands'`，并把 `runCommand` 改成惰性通道探测：优先
+  `remote.commands.execute`（能拿到 `kind/text`），失败再退回 `ISession.command`。
+- **插件页改了设置、主页面档位条不跟着变**：会话状态原先整份保存生效配置，插件页的新默认值
+  对老会话永远无效。现在状态文件只存**会话覆盖**（`overrides`），未覆盖字段实时跟随插件页；
+  投影新增 `defaults` / `overrides` / `overrideKeys`，档位条据此合并，并在有覆盖时显示 `⟲`。
+  旧状态文件在加载时自动迁移（只把与默认值不同的字段折算成覆盖）。
+- **插件页“改一个开关就把整份默认配置写进会话覆盖”**：新增 `pickPublicOverrides`，只挑显式
+  传入的字段，不再用会补全默认值的 `pickPublicConfig`。
+
+### 变更
+
+- 档位条从 `conversation.composer.dock`（卡片**下方**居中的灰色小 pill 行）迁到
+  `conversation.input.dock`（卡片**上方**全宽一行，原生 QueueDock 的位置），符合"输入框上方
+  一条轻量档位条"的原始需求。
+- 样式改走 `ctx.styles.insert()` 注入（作用域 `[data-dsh-improve-think]`、类名前缀 `dit-`），
+  尺寸与配色照抄原生 pill / 设置页规格，hover / focus-visible / 深色模式才有处可写。
+- 设置面板改用与原生设置页一致的排版（13px 标签、32px 输入框、12px 圆角、自适应网格），
+  并支持插件列表里的 `view:'summary'` 摘要态。
+
 ## [0.2.2] - 2026-11-12
 
 ### 修复

@@ -2,7 +2,7 @@
 //
 // 覆盖：
 //  1. 模块 id / inject 契约（id 必须等于包名，inject 必须含 slots）；
-//  2. 在 conversation.composer.dock 注册，且 id/order/label 正确；
+//  2. 在 conversation.input.dock 注册，且 id/order/label 正确；
 //  3. 投影值能渲染成档位条（含"疑似空转"与"降级"标记）；
 //  4. 没有 useProjection 时退回默认值，不抛错；
 //  5. 点击 → 首选 sessions.binding(id).session.command('/improve tier extreme')；
@@ -51,8 +51,19 @@ assert.ok(declared.has('locale'), 'inject 必须包含 locale')
 // 没声明的服务读不到，所以这两项必须显式声明。
 assert.ok(declared.has('sessions'), 'inject 必须声明 sessions（会话命令通道）')
 assert.ok(declared.has('configForms'), 'inject 必须声明 configForms（插件页设置表单）')
+// 宿主把每个远程命名空间注册成独立服务 remote.<ns>，读属性那一瞬就抛错，
+// 所以 remote 与 remote.commands 都必须声明（0.2.2 漏了，主页面按钮点不动）。
+assert.ok(declared.has('remote'), 'inject 必须声明 remote')
+assert.ok(declared.has('remote.commands'), 'inject 必须声明 remote.commands')
 
-function makeHarness({ withSessions = true, withRemote = true, withConfigForms = true, served = null } = {}) {
+function makeHarness({
+  withSessions = true,
+  withRemote = true,
+  withConfigForms = true,
+  served = null,
+  remoteGuard = false,
+  strictFacet = false,
+} = {}) {
   const registrations = []
   const calls = []
   const sessions = withSessions
@@ -130,7 +141,7 @@ function makeHarness({ withSessions = true, withRemote = true, withConfigForms =
       }
     : undefined
 
-  const services = { sessions, remote, configForms }
+  const services = { sessions, configForms }
   const ctx = {
     effect: (callback) => {
       callback()
@@ -147,9 +158,34 @@ function makeHarness({ withSessions = true, withRemote = true, withConfigForms =
         return () => {}
       },
     },
-    get: (service) => services[service],
+    get: (service) => {
+      // 模拟宿主守卫：没在 inject 里声明的远程服务，读属性那一瞬就抛错。
+      if (service === 'remote' && remoteGuard) {
+        throw new Error("cannot get property 'remote.commands' without inject")
+      }
+      return service === 'remote' ? remote : services[service]
+    },
   }
-  plugin.apply(ctx)
+  Object.defineProperty(ctx, 'remote', {
+    get() {
+      if (remoteGuard) throw new Error("cannot get property 'remote.commands' without inject")
+      return remote
+    },
+  })
+  // strictFacet：模拟受限 facade —— 读任何未声明服务都会立刻抛错（与真实宿主一致）。
+  // 用来兜住"直接 ctx.styles / ctx.remote 裸读"这类会让 apply 抛错、整页启动失败的写法。
+  const builtins = new Set(['get', 'on', 'provide', 'effect', 'fiber'])
+  const faceted = strictFacet
+    ? new Proxy(ctx, {
+        get(target, prop) {
+          if (typeof prop !== 'string' || builtins.has(prop) || declared.has(prop) || prop in target) {
+            return Reflect.get(target, prop)
+          }
+          throw new Error(`cannot get property '${prop}' without inject`)
+        },
+      })
+    : ctx
+  plugin.apply(faceted)
   return { registrations, calls, formWrites, formResets, formEntryIds, servedNamespaces, form }
 }
 
@@ -184,18 +220,21 @@ function allNodes(node, bucket = []) {
 {
   const { registrations } = makeHarness()
   assert.equal(registrations.length, 2, '应注册 dock 条目 + 插件页设置面板')
-  const { definition } = findSlot(registrations, 'conversation.composer.dock')
-  assert.equal(definition.name, 'conversation.composer.dock')
+  const { definition } = findSlot(registrations, 'conversation.input.dock')
+  assert.equal(definition.name, 'conversation.input.dock')
   assert.equal(definition.id, 'dsh-improve-think')
-  assert.equal(definition.order, 20)
+  assert.equal(definition.order, 30)
   assert.equal(typeof definition.label, 'function')
   assert.equal(definition.label(), 'label')
 }
 
+const findHintButton = (tree, hint) =>
+  allNodes(tree).find((node) => node.type === 'button' && node.props?.title === hint)
+
 // ---- 2. 投影渲染 -------------------------------------------------------------
 {
   const { registrations } = makeHarness()
-  const Component = findSlot(registrations, 'conversation.composer.dock').component
+  const Component = findSlot(registrations, 'conversation.input.dock').component
   const tree = Component({
     sessionId: 'session-1',
     useProjection: () => ({
@@ -209,10 +248,14 @@ function allNodes(node, bucket = []) {
     }),
   })
   const texts = textsOf(tree)
-  assert.ok(texts.includes('tiers.extreme'), `应高亮极致档：${texts.join(',')}`)
-  assert.ok(texts.some((text) => text.startsWith('adversarial on')), '对抗应显示为开')
-  assert.ok(texts.some((text) => text.startsWith('idleGuard on')), '空转守护应显示为开')
-  assert.ok(texts.some((text) => text.startsWith('firstTurnFast off')), '首轮快跳应显示为关')
+  const extreme = allNodes(tree).find((node) => node.type === 'button' && node.props?.['aria-pressed'] === true && textsOf(node).includes('tiers.extreme'))
+  assert.ok(extreme, `极致档应是选中态：${texts.join(',')}`)
+  assert.equal(findHintButton(tree, 'hint.adversarial')?.props['aria-pressed'], true, '对抗应显示为开')
+  assert.equal(findHintButton(tree, 'hint.idleGuard')?.props['aria-pressed'], true, '空转守护应显示为开')
+  assert.equal(findHintButton(tree, 'hint.firstTurnFast')?.props['aria-pressed'], false, '首轮快跳应显示为关')
+  // 开关态用小圆点表示：开=实心，关=空心描边。
+  const dot = findHintButton(tree, 'hint.adversarial').children[0]
+  assert.equal(dot.props.className, 'dit-dot', '开关态圆点应走 dit-dot 样式类')
   assert.ok(texts.some((text) => text.includes('idle') && text.includes('⚠')), '应出现疑似空转标记')
   assert.ok(texts.some((text) => text.includes('degraded')), '应出现降级标记')
 
@@ -224,19 +267,20 @@ function allNodes(node, bucket = []) {
 // ---- 3. 无投影时退回默认值 ---------------------------------------------------
 {
   const { registrations } = makeHarness()
-  const Component = findSlot(registrations, 'conversation.composer.dock').component
+  const Component = findSlot(registrations, 'conversation.input.dock').component
   const tree = Component({ sessionId: 'session-2' })
   const texts = textsOf(tree)
-  assert.ok(texts.includes('tiers.normal'), '没有投影时默认常规档')
-  assert.ok(texts.some((text) => text.startsWith('idleGuard on')), '没有投影时空转守护默认开')
-  assert.ok(texts.some((text) => text.startsWith('firstTurnFast on')), '没有投影时首轮快跳默认开')
+  const normal = allNodes(tree).find((node) => node.type === 'button' && node.props?.['aria-pressed'] === true)
+  assert.ok(normal && textsOf(normal).includes('tiers.normal'), '没有投影时默认常规档')
+  assert.equal(findHintButton(tree, 'hint.idleGuard')?.props['aria-pressed'], true, '没有投影时空转守护默认开')
+  assert.equal(findHintButton(tree, 'hint.firstTurnFast')?.props['aria-pressed'], true, '没有投影时首轮快跳默认开')
   assert.ok(!texts.some((text) => text.includes('degraded')), '未知能力时不应谎报降级')
 }
 
 // ---- 4. 点击写回 Host --------------------------------------------------------
 {
   const { registrations, calls } = makeHarness()
-  const Component = findSlot(registrations, 'conversation.composer.dock').component
+  const Component = findSlot(registrations, 'conversation.input.dock').component
   const tree = Component({
     sessionId: 'session-3',
     useProjection: () => ({ tier: 'normal', adversarial: false, idleGuard: true, firstTurnFast: true }),
@@ -248,16 +292,17 @@ function allNodes(node, bucket = []) {
   extreme.props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(calls[0], {
-    channel: 'session.command',
+    channel: 'remote.commands.execute',
     sessionId: 'session-3',
     line: '/improve tier extreme',
+    attachments: [],
   })
 }
 
 // ---- 5. 没有 sessionId 时不发命令 -------------------------------------------
 {
   const { registrations, calls } = makeHarness()
-  const Component = findSlot(registrations, 'conversation.composer.dock').component
+  const Component = findSlot(registrations, 'conversation.input.dock').component
   const tree = Component({ useProjection: () => ({ tier: 'normal' }) })
   const buttons = allNodes(tree).filter((node) => node.type === 'button')
   buttons[0].props.onClick()
@@ -265,10 +310,10 @@ function allNodes(node, bucket = []) {
   assert.equal(calls.length, 0, '没有 sessionId 时不应调用 commands.execute')
 }
 
-// ---- 6. 没有 sessions 服务时退到 remote.commands.execute ---------------------
+// ---- 6. 没有 remote 命名空间时退回 ISession.command（旧宿主兜底） -------------
 {
-  const { registrations, calls } = makeHarness({ withSessions: false })
-  const Component = findSlot(registrations, 'conversation.composer.dock').component
+  const { registrations, calls } = makeHarness({ withRemote: false })
+  const Component = findSlot(registrations, 'conversation.input.dock').component
   const tree = Component({ sessionId: 'session-4', useProjection: () => ({ tier: 'normal' }) })
   const buttons = allNodes(tree).filter((node) => node.type === 'button')
   const strict = buttons.find((button) => textsOf(button).includes('tiers.strict'))
@@ -276,10 +321,9 @@ function allNodes(node, bucket = []) {
   strict.props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(calls[0], {
-    channel: 'remote.commands.execute',
+    channel: 'session.command',
     sessionId: 'session-4',
     line: '/improve tier strict',
-    attachments: [],
   })
 }
 
@@ -312,7 +356,8 @@ function allNodes(node, bucket = []) {
   const Component = panel.component
   const tree = Component({ ...injected, useSettings: (selector) => selector(source.getSnapshot()) })
   const texts = textsOf(tree)
-  assert.ok(texts.includes('settings.title'), `应渲染设置面板标题：${texts.join(',')}`)
+  // 详情页标题由 DSH 插件页自己出，我们只放一行说明，避免重复标题。
+  assert.ok(texts.includes('settings.subtitle'), `应渲染设置面板说明：${texts.join(',')}`)
   assert.ok(texts.includes('settings.guard'), '应渲染空转守护参数分组')
   assert.ok(texts.some((text) => text.startsWith('adversarial off')), '对抗默认关')
   const inputs = allNodes(tree).filter((node) => node.type === 'input')
@@ -360,4 +405,84 @@ function allNodes(node, bucket = []) {
   assert.equal(formEntryIds.at(-1), 'dsh-improve-think', '应按实际被服务的 namespace 取表单')
 }
 
-console.log('client.test.mjs：9 组断言全部通过')
+// ---- 10. 默认值 / 会话覆盖：覆盖压过默认值，且能一键恢复 ---------------------
+{
+  const { registrations, calls } = makeHarness()
+  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const tree = Component({
+    sessionId: 'session-5',
+    useProjection: () => ({
+      tier: 'normal',
+      defaults: { tier: 'extreme', adversarial: false, idleGuard: true, firstTurnFast: true },
+      overrides: { tier: 'normal' },
+      overrideKeys: ['tier'],
+    }),
+  })
+  const active = allNodes(tree).find((node) => node.type === 'button' && node.props?.['aria-pressed'] === true)
+  assert.ok(textsOf(active).includes('tiers.normal'), '本会话覆盖应压过插件页默认值')
+
+  const reset = allNodes(tree).find((node) => node.type === 'button' && node.props?.title === 'hint.reset')
+  assert.ok(reset, '存在会话覆盖时应出现「恢复默认值」按钮')
+  reset.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(calls.at(-1).line, '/improve reset', '恢复按钮应发送 /improve reset')
+}
+
+// ---- 11. 没有会话覆盖时，档位条实时跟随插件页默认值 -------------------------
+{
+  const { registrations } = makeHarness()
+  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const tree = Component({
+    sessionId: 'session-6',
+    useProjection: () => ({
+      tier: 'normal',
+      defaults: { tier: 'extreme', adversarial: true, idleGuard: true, firstTurnFast: true },
+      overrides: {},
+      overrideKeys: [],
+    }),
+  })
+  const active = allNodes(tree).find((node) => node.type === 'button' && node.props?.['aria-pressed'] === true)
+  assert.ok(textsOf(active).includes('tiers.extreme'), '没有覆盖时应显示插件页默认档位')
+  assert.equal(findHintButton(tree, 'hint.adversarial')?.props['aria-pressed'], true, '开关也应跟默认值')
+  assert.equal(
+    allNodes(tree).find((node) => node.type === 'button' && node.props?.title === 'hint.reset'),
+    undefined,
+    '没有覆盖时不应出现恢复按钮',
+  )
+}
+
+// ---- 12. 宿主把 remote 通道锁住时，点击仍然走 sessions 通道 -------------------
+{
+  const { registrations, calls } = makeHarness({ remoteGuard: true })
+  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const tree = Component({ sessionId: 'session-7' })
+  const extreme = allNodes(tree).find((node) => node.type === 'button' && textsOf(node).includes('tiers.extreme'))
+  assert.ok(extreme, '应有极致档按钮')
+  extreme.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(calls.length, 1, `不应触发 remote 通道：${JSON.stringify(calls)}`)
+  assert.equal(calls[0].channel, 'session.command', '应走 ISession.command')
+  assert.equal(calls[0].line, '/improve tier extreme')
+}
+
+// ---- 13. 所有通道都被锁住时，点击只失败不崩溃（错误走组件内状态） -------------
+{
+  const { registrations, calls } = makeHarness({ withSessions: false, remoteGuard: true })
+  const Component = findSlot(registrations, 'conversation.input.dock').component
+  const tree = Component({ sessionId: 'session-8' })
+  const normal = allNodes(tree).find((node) => node.type === 'button' && textsOf(node).includes('tiers.normal'))
+  // 点击必须吞掉通道错误（否则会冒泡成未处理的 Promise 拒绝，把整个目录树带崩）。
+  normal.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(calls.length, 0, '没有通道时不应发出任何命令')
+}
+
+// ---- 14. 受限 facade：apply 期间不得裸读未声明服务（否则整页启动失败） --------
+{
+  const { registrations } = makeHarness({ strictFacet: true })
+  assert.equal(registrations.length, 2, '受限 facade 下仍应注册档位条与设置面板')
+  const names = registrations.map((entry) => entry.definition.name).sort()
+  assert.deepEqual(names, ['conversation.input.dock', 'plugins.bundle.config'])
+}
+
+console.log('client.test.mjs：14 组断言全部通过')

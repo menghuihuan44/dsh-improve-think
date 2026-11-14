@@ -673,6 +673,67 @@ async function scenarioLiveSettings() {
     `缺少 settings 服务时应如实报告：${stillOverridden.text}`,
   )
 
+  // 覆盖是「逐字段」的：只改过 tier 的会话，其它字段仍实时跟随插件页默认值。
+  live.goalCheckInterval = 9
+  const partial = ask('session-live-a', 'status')
+  assert.ok(partial.text.includes('goalCheckInterval=9'), `未覆盖的字段应跟随新默认值：${partial.text}`)
+  assert.ok(partial.text.includes('本会话覆盖：tier=normal'), `status 应列出会话覆盖字段：${partial.text}`)
+
+  // 状态文件只存「覆盖」，不再存整份配置——否则插件页改设置对老会话永远无效。
+  // 落盘是 400ms 去抖的，这里用 session/flush 立刻刷一次（宿主在回合结束/退出时也会这么做）。
+  for (const handler of host.listeners.get('session/flush') ?? []) handler({ id: 'session-live-a' })
+  const persisted = JSON.parse(fs.readFileSync(statePath, 'utf8'))
+  const entry = persisted.sessions['session-live-a']
+  assert.ok(entry, '会话覆盖应落盘')
+  assert.deepEqual(entry.overrides, { tier: 'normal' }, `只应落盘覆盖字段：${JSON.stringify(entry)}`)
+  assert.equal(entry.config, undefined, '不应再写整份 config')
+
+  // 投影必须把「默认值」与「本会话覆盖」分开给出，UI 才能做实时合并。
+  const unit = host.projections[0]
+  const projected = unit.wire.view(unit.apply(unit.init({ id: 'session-live-a' })))
+  assert.deepEqual(projected.overrides, { tier: 'normal' }, `投影应带会话覆盖：${JSON.stringify(projected.overrides)}`)
+  assert.deepEqual(projected.overrideKeys, ['tier'], `投影应带覆盖键名：${JSON.stringify(projected.overrideKeys)}`)
+  assert.equal(projected.defaults?.tier, 'strict', `投影应带插件页默认值：${JSON.stringify(projected.defaults)}`)
+  assert.equal(projected.tier, 'normal', '生效值仍是覆盖后的值')
+
+  // 撤销覆盖后重新跟随默认值。
+  const unset = ask('session-live-a', 'unset tier')
+  assert.ok(unset.text.includes('已撤销会话覆盖'), `应支持撤销覆盖：${unset.text}`)
+  assert.ok(unset.text.includes('本会话覆盖：无'), `撤销后应无覆盖：${unset.text}`)
+
+  // v1 遗留状态（整份 config）要能迁移成 overrides，而不是把旧值钉死。
+  const legacyPath = makeSessionStateFile()
+  const legacyLive = { tier: 'strict', goalCheckInterval: 5, statePath: legacyPath, logDir: path.dirname(legacyPath) }
+  fs.writeFileSync(
+    legacyPath,
+    JSON.stringify({
+      version: 1,
+      defaults: { tier: 'extreme', adversarial: false, idleGuard: true, firstTurnFast: true, stagnationCount: 3, reasoningSimilarityThreshold: 0.8, goalCheckInterval: 5 },
+      sessions: {
+        'session-legacy': {
+          config: { tier: 'normal', adversarial: false, idleGuard: true, firstTurnFast: true, stagnationCount: 3, reasoningSimilarityThreshold: 0.8, goalCheckInterval: 5 },
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    }),
+    'utf8',
+  )
+  const legacyConfig = Object.fromEntries(Object.keys(legacyLive).map((key) => [key, { get: () => legacyLive[key] }]))
+  const legacyHost = createFakeHost({ config: legacyConfig, withCommands: true })
+  startPlugin(legacyHost, legacyConfig)
+  const legacyStatus = legacyHost.commands.get('improve').handler({
+    agent: { id: 'session-legacy', session: { id: 'session-legacy' } },
+    rawInput: 'status',
+    attachments: [],
+    signal: { aborted: false },
+  })
+  assert.ok(legacyStatus.text.includes('常规'), `v1 覆盖应保留：${legacyStatus.text}`)
+  assert.ok(legacyStatus.text.includes('goalCheckInterval=5'), `未覆盖字段应来自默认值：${legacyStatus.text}`)
+  for (const handler of legacyHost.listeners.get('session/flush') ?? []) handler({ id: 'session-legacy' })
+  const migrated = JSON.parse(fs.readFileSync(legacyPath, 'utf8'))
+  assert.deepEqual(migrated.sessions['session-legacy'].overrides, { tier: 'normal' }, `迁移后只保留差异字段：${JSON.stringify(migrated.sessions)}`)
+  assert.equal(migrated.sessions['session-legacy'].config, undefined, '迁移后应删掉整份 config')
+
   // 有 settings 服务且确实服务了本插件 → 报告"已开放"。
   const servedHost = createFakeHost({
     config,

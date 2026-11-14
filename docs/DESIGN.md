@@ -36,7 +36,7 @@ Host 半 (lib/index.js)
 └─ Config (schemastery)             ── 插件页设置表单
 
 Client 半 (lib/client.js)
-├─ conversation.composer.dock       ── 输入框下方档位条
+├─ conversation.input.dock          ── 输入框上方全宽档位条
 └─ plugins.bundle.config            ── 插件页设置面板（读 ctx.configForms）
 ```
 

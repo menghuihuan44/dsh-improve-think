@@ -43,7 +43,7 @@ plugin_manager({ action: "install_bundle", target: "<克隆下来的绝对路径
 
 | 入口 | 位置 | 适用 |
 | --- | --- | --- |
-| 档位条 | 输入框下方（`conversation.composer.dock`） | 日常切换当前会话的档位与开关 |
+| 档位条 | 输入框上方全宽一行（`conversation.input.dock`） | 日常切换当前会话的档位与开关 |
 | 插件页设置 | DSH「插件」→ dsh-improve-think → 配置 | 改**默认值**（新会话生效），重启后仍在 |
 | `/improve` 命令 + `dsh_improve` 工具 | 会话输入框 / 模型自身 | 手动排障、让模型自己切档 |
 
@@ -267,7 +267,7 @@ npm run selftest   # 10 条验收场景（假 Cordis ctx 驱动真实插件代�
    `capabilities.ready` 如实补记；
 10. **设置 schema 降级**：宿主不提供 schemastery 时插件仍可用（不崩、不谎报）。
 
-`npm test` 的 client 部分另外验证：模块 id 等于包名、注册 `conversation.composer.dock`、
+`npm test` 的 client 部分另外验证：模块 id 等于包名、注册 `conversation.input.dock`、
 投影渲染（含"疑似空转/降级"标记）、点击首选 `ISession.command`、缺 `sessions` 时退到 `remote.commands.execute`、
 无 `sessionId` 不发命令、插件页设置面板的注册/读快照/写回/恢复默认、缺 `configForms` 时不注册空面板。
 
@@ -283,7 +283,7 @@ npm run selftest   # 10 条验收场景（假 Cordis ctx 驱动真实插件代�
 | 流式拦截 | `stream.observed` 记录 `provider=… model=… reasoningEffort=high`——拦到真实请求，且**未改动** `reasoning_effort` |
 | 模型侧工具 | `dsh_improve` 出现在真实会话工具列表，`status` / `tier extreme` / `reset` 实测成功 |
 | 会话内持久化 | `state.json` 出现本会话 `config.tier="extreme"`；reset 后清空 |
-| UI 挂载 | `conversation.composer.dock` occupants 含 `dsh-improve-think (order 20, active:true)` |
+| UI 挂载 | `conversation.input.dock` occupants 含 `dsh-improve-think (order 10, active:true)` |
 | 不误伤 | 277 个 step、328 次工具调用的深度工作期间 `idle.observe` 0 条、`idle.interrupt` 0 条 |
 
 两点环境事实：
