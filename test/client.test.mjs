@@ -13,8 +13,44 @@ import { readFileSync } from 'node:fs'
 
 const React = {
   createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }),
-  useState: (initial) => [initial, () => {}],
+  // 迷你 hook 运行时：按组件身份存状态，这样同一个组件再渲染一次就能读到更新后的
+  // 值（自检结果、收起按钮这类交互必须能跨渲染验证）。
+  __hooks: new WeakMap(),
+  __owner: null,
+  __cursor: 0,
+  useState(initial) {
+    const owner = React.__owner
+    const index = React.__cursor++
+    if (!owner) return [initial, () => {}]
+    let slots = React.__hooks.get(owner)
+    if (!slots) {
+      slots = []
+      React.__hooks.set(owner, slots)
+    }
+    if (!(index in slots)) slots[index] = initial
+    return [
+      slots[index],
+      (next) => {
+        slots[index] = typeof next === 'function' ? next(slots[index]) : next
+      },
+    ]
+  },
   useEffect: () => {},
+  __wrap(component) {
+    const wrapped = (props) => {
+      const previousOwner = React.__owner
+      const previousCursor = React.__cursor
+      React.__owner = wrapped
+      React.__cursor = 0
+      try {
+        return component(props)
+      } finally {
+        React.__owner = previousOwner
+        React.__cursor = previousCursor
+      }
+    }
+    return wrapped
+  },
 }
 
 let loaded
@@ -25,6 +61,27 @@ globalThis.window = {
       loaded = definition
     },
   },
+}
+
+// 样式表通道：本包走 client-modules 的 __ModuleLoader__，宿主会在 factory 执行期间
+// 认领它新建的 <style>（claimStyles）。这里用极小 document 桩验证我们真的建了标签——
+// 之前误用 ctx.styles（动态双半包才有），样式表从未注入，界面上就是一排一样的灰按钮。
+const appendedStyles = []
+globalThis.document = {
+  head: {
+    appendChild: (node) => {
+      appendedStyles.push(node)
+      return node
+    },
+  },
+  createElement: () => ({
+    attrs: {},
+    textContent: '',
+    setAttribute(name, value) {
+      this.attrs[name] = value
+    },
+  }),
+  querySelector: () => null,
 }
 
 const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
@@ -55,6 +112,19 @@ assert.ok(declared.has('configForms'), 'inject 必须声明 configForms（插件
 // 所以 remote 与 remote.commands 都必须声明（0.2.2 漏了，主页面按钮点不动）。
 assert.ok(declared.has('remote'), 'inject 必须声明 remote')
 assert.ok(declared.has('remote.commands'), 'inject 必须声明 remote.commands')
+
+// 样式表必须真的被建出来（否则选中态只能靠内联兜底，且档位条会退回"一排灰按钮"）。
+assert.equal(appendedStyles.length, 1, 'factory 内应恰好建一个 <style>')
+const styleTag = appendedStyles[0]
+assert.ok(
+  String(styleTag.textContent).includes("[data-active='true']"),
+  '样式表里要包含选中态的实心主色规则',
+)
+assert.equal(
+  styleTag.attrs['data-dsh-improve-think-style'],
+  '',
+  '样式标签应带专属标记，便于排查与避免重复注入',
+)
 
 function makeHarness({
   withSessions = true,
@@ -157,7 +227,7 @@ function makeHarness({
     slots: {
       inject: (name, callback) => callback(),
       register: (definition, component) => {
-        registrations.push({ definition, component })
+        registrations.push({ definition, component: React.__wrap(component) })
         return () => {}
       },
     },
@@ -525,12 +595,37 @@ const findHintButton = (tree, hint) =>
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.equal(calls.at(-1).line, '/improve status', '自检应执行 /improve status')
 
-  // 重新渲染拿到更新后的 state（测试用的迷你 React 无重渲染，这里直接读组件内部状态）
+  // 重新渲染拿到更新后的 state（迷你 React 按组件身份保存状态）
   const rendered = Component({
     sessionId: 'session-9',
     useProjection: () => ({ tier: 'strict', adversarial: false, idleGuard: true, firstTurnFast: true }),
   })
   assert.ok(rendered, '自检后组件仍应可渲染')
+  const reportNode = allNodes(rendered).find((node) => node.props?.className === 'dit-report')
+  assert.ok(reportNode, '自检结果应铺在条内第二行')
+  assert.ok(textsOf(rendered).includes(statusText), '自检结果应显示 Host 返回的真实状态')
+  assert.ok(
+    allNodes(rendered).some(
+      (node) => node.type === 'button' && String(textsOf(node)).includes('verifyHide'),
+    ),
+    '有结果时自检按钮应变成「收起」',
+  )
+
+  // 结果不能只能刷新页面才清掉：× 与再次点自检都要能收起。
+  const closeButton = allNodes(rendered).find(
+    (node) => node.type === 'button' && node.props?.className === 'dit-report-close',
+  )
+  assert.ok(closeButton, '自检结果应带显式收起按钮')
+  closeButton.props.onClick()
+  const collapsed = Component({
+    sessionId: 'session-9',
+    useProjection: () => ({ tier: 'strict', adversarial: false, idleGuard: true, firstTurnFast: true }),
+  })
+  assert.equal(
+    allNodes(collapsed).find((node) => node.props?.className === 'dit-report'),
+    undefined,
+    '点 × 之后自检结果应消失',
+  )
 }
 
 console.log('client.test.mjs：15 组断言全部通过')
