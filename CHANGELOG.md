@@ -2,6 +2,19 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.1] - 2026-11-15
+
+### 修复
+
+- **主页面档位条不居中、插件页设置也不像卡片——同一个 CSS 选择器错误**：
+  根元素自己同时带 `data-dsh-improve-think` 属性和 `dit-band` / `dit-choice` / `dit-page`
+  等类名，而样式写成了 `[data-dsh-improve-think] .dit-band`（后代选择器），规则根本命中不到
+  这条根元素。于是 `.dit-band` 的 `width` 公式与 `justify-content:center` 从未生效
+  （内容按 flex 默认左对齐），设置页的卡片/标题/输入框规则也一并失效。
+  现已全部改为复合选择器 `[data-dsh-improve-think].dit-band`，并加测试守住这个坑。
+- 顺带把控件尺寸对齐原生工具行：分段轨道 28px、内部按钮 24px、开关 chip 28px、
+  字号 13px/20px，行距与原生 chip 一致。
+
 ## [0.3.0] - 2026-11-15
 
 ### 新增

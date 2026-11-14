@@ -129,6 +129,19 @@ assert.ok(
   String(styleTag.textContent).includes('justify-content: center'),
   '档位条内容应居中（用户要求放在当前位置的中间）',
 )
+// 反面教材：根元素自己同时带 data-dsh-improve-think 与类名，
+// 若写成"[属性] .类名"这种后代选择器，规则根本不会命中这条根元素
+// ——0.2.7 的"居中"与设置页卡片样式就是这么静默失效的。
+for (const rootClass of ['.dit-band', '.dit-choice', '.dit-page', '.dit-summary']) {
+  assert.ok(
+    String(styleTag.textContent).includes(`[data-dsh-improve-think]${rootClass} {`),
+    `${rootClass} 必须用复合选择器（属性与类名在同一个元素上）`,
+  )
+  assert.ok(
+    !String(styleTag.textContent).includes(`[data-dsh-improve-think] ${rootClass} {`),
+    `${rootClass} 不能写成后代选择器，否则规则不会命中根元素`,
+  )
+}
 assert.equal(
   styleTag.attrs['data-dsh-improve-think-style'],
   '',
